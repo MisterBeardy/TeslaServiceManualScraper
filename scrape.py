@@ -12,8 +12,8 @@ import pickle
 from secrets import tesla_login
 
 # TODO: Indicate which manual you plan to scrape, currently set to Model 3.  Also increase the login delay in secrets.py to give yourself time to login if you have 2FA or encounter other login issues.
-service_manual_index = "https://service.tesla.com/docs/ModelY/ServiceManual/en-us/"
-base_url = "https://service.tesla.com/docs/ModelY/ServiceManual/en-us/"
+service_manual_index = "https://service.tesla.com/docs/ModelS/ServiceManual/en-us/index.html"
+base_url = "https://service.tesla.com/docs/ModelS/ServiceManual/en-us/"
 
 visited_urls = []
 banned_urls = []
@@ -115,10 +115,12 @@ class Webdriver:
     open("docs/tds-fonts/3.x/woff2/GothamSSm-Medium_web.woff2", 'wb').write(r.content)
   def get_html(self):
     # Loop to get all the html pages, and store information about images to be downloaded later.
+    error_count = 0
     while upcoming_urls:
       for url in upcoming_urls:
         if len(visited_urls) % 50 == 0:
           save_session()
+
         if url.startswith('GUID') and url.endswith('.html'):
           self.driver.get(base_url + url)
         else:
@@ -127,7 +129,9 @@ class Webdriver:
 
         source = self.driver.find_element_by_css_selector("html").get_attribute('outerHTML')
         if not check_source_validity(source):
-          self.restart_scrape()
+          error_count += 1
+          if error_count > 10:
+            self.restart_scrape()
 
         with open('docs/' + url, 'w', encoding='utf-8') as f:
           source = re.sub(mpulse_tracker, '', source)
@@ -139,10 +143,12 @@ class Webdriver:
           upcoming_urls.remove(url)
           print("visited: " + str(len(visited_urls)))
           print("upcoming: " + str(len(upcoming_urls)))
-          print("images: " + str(len(set(img_urls))))
+          print("images to be downloaded: " + str(len(set(img_urls))))
 
         append_upcoming_and_img_urls(source)
+
         if len(visited_urls) % 150 == 0:
+          save_session()
           self.restart_scrape()
 
   def get_imgs(self):
@@ -176,16 +182,20 @@ class Webdriver:
 def append_upcoming_and_img_urls(source):
   soup = BeautifulSoup(source, 'html.parser')
   for link in soup.find_all('a'):
-    if link.get('href') not in visited_urls and link.get('href') not in banned_urls and link.get('href') not in upcoming_urls:
-      if link.get('href').startswith('GUID') and link.get('href').endswith('.html'):
-        upcoming_urls.append(link.get('href'))
+    if type(link.get('href')) == str:
+      if link.get('href') not in visited_urls and link.get('href') not in banned_urls and link.get('href') not in upcoming_urls:
+        if link.get('href').startswith('GUID') and link.get('href').endswith('.html'):
+          upcoming_urls.append(link.get('href'))
 
   for img in soup.find_all('img'):
     if img.get('src') not in img_urls:
-      img_urls.append(img.get('src'))
+      if type(img.get('src')) == str:
+        img_urls.append(img.get('src'))
 
 def check_source_validity(source):
   if 'design-system/4.x/index.css' in source and '<title>Tesla Service</title>' in source:
+    return False
+  elif '<title>Access Denied</title>' in source:
     return False
   else:
     return True
